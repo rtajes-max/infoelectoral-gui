@@ -19,3 +19,6 @@ reference/
 
 # Excel temporales del usuario
 ~$*.xlsx
+
+# Instrucciones operativas locales (no van al repo público)
+PUBLISH.md
