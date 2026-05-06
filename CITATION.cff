@@ -1,0 +1,31 @@
+cff-version: 1.2.0
+title: "infoelectoral GUI — visor de microdatos electorales del Ministerio del Interior español"
+message: >-
+  Si usas este software en un trabajo de investigación o un artículo,
+  por favor cita TANTO este proyecto COMO el proyecto original de
+  Jaime Gómez-Obregón en el que se basa.
+type: software
+license: AGPL-3.0
+abstract: >-
+  Aplicación de escritorio (Windows .exe, multiplataforma) que decodifica
+  los ficheros .DAT del Ministerio del Interior español usando el parser
+  de Jaime Gómez-Obregón portado a Python, con interfaz gráfica para
+  inspección, filtrado por municipio y exportación a CSV.
+authors:
+  - family-names: "(contributors)"
+    given-names: "infoelectoral-gui"
+
+references:
+  - type: software
+    title: "infoelectoral — intérprete de microdatos electorales del Ministerio del Interior español"
+    authors:
+      - family-names: "Gómez-Obregón"
+        given-names: "Jaime"
+    url: "https://github.com/JaimeObregon/infoelectoral"
+    license: AGPL-3.0
+    year: 2020
+    notes: >-
+      Proyecto del que esta aplicación es una obra derivada. Aporta la
+      especificación completa de los ficheros .DAT del Ministerio, el parser
+      de referencia, las tablas de municipios INE por año y los fixups para
+      registros corruptos del Ministerio.

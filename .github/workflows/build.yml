@@ -1,0 +1,79 @@
+name: Build Windows .exe
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Verify data resources
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "data\municipios")) {
+            Write-Error "Falta data\municipios. ¿Olvidaste correr scripts/extract_constants.py antes del commit?"
+            exit 1
+          }
+
+      - name: Build .exe with PyInstaller
+        run: pyinstaller infoelectoral.spec --clean --noconfirm
+
+      - name: Smoke-test the .exe
+        run: dist\infoelectoral.exe --version
+
+      - name: Compute SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist\infoelectoral.exe -Algorithm SHA256).Hash
+          "$hash  infoelectoral.exe" | Out-File -Encoding ascii dist\infoelectoral.exe.sha256
+          Write-Host "SHA-256: $hash"
+
+      - name: Upload as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: infoelectoral-windows
+          path: |
+            dist/infoelectoral.exe
+            dist/infoelectoral.exe.sha256
+
+      - name: Attach to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/infoelectoral.exe
+            dist/infoelectoral.exe.sha256
+          body: |
+            **infoelectoral GUI ${{ github.ref_name }}**
+
+            Descarga `infoelectoral.exe` y haz doble click. No necesita Python ni
+            ninguna otra dependencia.
+
+            Verifica el SHA-256 si te preocupa la integridad:
+
+            ```
+            certutil -hashfile infoelectoral.exe SHA256
+            ```
+
+            Esta aplicación se construye sobre el trabajo de
+            [Jaime Gómez-Obregón](https://github.com/JaimeObregon/infoelectoral).
+            **Gracias, Jaime.**
