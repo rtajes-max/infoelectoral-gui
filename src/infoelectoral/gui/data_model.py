@@ -88,6 +88,28 @@ class DatFilterProxy(QSortFilterProxyModel):
         self.setSortRole(Qt.UserRole)
         self.setDynamicSortFilter(True)
 
+    def setSourceModel(self, sourceModel) -> None:  # noqa: N802, N803
+        """Limpia los filtros cuando cambia el modelo (las columnas pueden cambiar)."""
+        previous = self.sourceModel()
+        if previous is not None:
+            try:
+                previous.modelReset.disconnect(self._on_source_reset)
+            except (RuntimeError, TypeError):
+                pass
+        super().setSourceModel(sourceModel)
+        if sourceModel is not None:
+            sourceModel.modelReset.connect(self._on_source_reset)
+        self._on_source_reset()
+
+    def _on_source_reset(self) -> None:
+        # Cuando el modelo se resetea, los índices de columna pueden quedar
+        # obsoletos (cambia el número y orden de columnas). Limpiamos filtros
+        # de columna; el caller (main_window) los volverá a aplicar contra el
+        # nuevo modelo si procede.
+        self._column_filters.clear()
+        self._column_in_set.clear()
+        self.invalidateRowsFilter()
+
     def set_free_text(self, text: str) -> None:
         self._free_text = text.strip().lower()
         self.invalidateRowsFilter()
@@ -118,9 +140,14 @@ class DatFilterProxy(QSortFilterProxyModel):
         model = self.sourceModel()
         if model is None:
             return True
+        n_cols = model.columnCount(source_parent)
 
         # Filtros por columna (substring): AND
         for col, needle in self._column_filters.items():
+            if col < 0 or col >= n_cols:
+                # El filtro apunta a una columna que ya no existe (cambió el modelo).
+                # Lo ignoramos silenciosamente.
+                continue
             idx = model.index(source_row, col, source_parent)
             cell = (model.data(idx, Qt.DisplayRole) or "").lower()
             if needle not in cell:
@@ -128,6 +155,8 @@ class DatFilterProxy(QSortFilterProxyModel):
 
         # Filtros por pertenencia a conjunto: AND
         for col, allowed in self._column_in_set.items():
+            if col < 0 or col >= n_cols:
+                continue
             idx = model.index(source_row, col, source_parent)
             cell = model.data(idx, Qt.DisplayRole) or ""
             if cell not in allowed:
@@ -135,8 +164,7 @@ class DatFilterProxy(QSortFilterProxyModel):
 
         # Texto libre: OR sobre todas las columnas
         if self._free_text:
-            cols = model.columnCount(source_parent)
-            for c in range(cols):
+            for c in range(n_cols):
                 idx = model.index(source_row, c, source_parent)
                 cell = (model.data(idx, Qt.DisplayRole) or "").lower()
                 if self._free_text in cell:
@@ -146,8 +174,11 @@ class DatFilterProxy(QSortFilterProxyModel):
         return True
 
     def lessThan(self, left: QModelIndex, right: QModelIndex) -> bool:  # noqa: N802
-        a = self.sourceModel().data(left, Qt.UserRole)
-        b = self.sourceModel().data(right, Qt.UserRole)
+        model = self.sourceModel()
+        if model is None:
+            return False
+        a = model.data(left, Qt.UserRole)
+        b = model.data(right, Qt.UserRole)
         # Comparación tolerante a None y a tipos mixtos.
         if a is None and b is None:
             return False
@@ -157,4 +188,7 @@ class DatFilterProxy(QSortFilterProxyModel):
             return False
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             return a < b
-        return str(a) < str(b)
+        try:
+            return str(a) < str(b)
+        except Exception:
+            return False

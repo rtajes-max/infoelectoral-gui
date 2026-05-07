@@ -4,6 +4,25 @@ Todos los cambios reseñables se documentan aquí. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y la versión sigue
 [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.3.1] — Hardening de filtros
+
+### Corregido
+
+- **Crash al cambiar de fichero con un preset/filtro activo.** Los índices de
+  columna del modelo viejo quedaban referenciando posiciones que en el nuevo
+  modelo apuntaban a otras columnas (o no existían). Ahora el proxy se
+  resetea automáticamente cuando cambia el `sourceModel` o se emite
+  `modelReset`, y `filterAcceptsRow` valida bounds antes de leer.
+- Los slots de UI de los filtros (`_on_search_changed`, `_on_muni_changed`,
+  `_on_preset_changed`) ahora envuelven todo en `try/except` y muestran un
+  `QMessageBox` en lugar de cerrar la app silenciosamente.
+
+### Añadido
+
+- **`sys.excepthook` global** que escribe cualquier excepción no manejada a
+  `%APPDATA%/infoelectoral/errors.log` y muestra un diálogo con el resumen y
+  la ruta del log. Útil para diagnosticar futuros bugs sin tener consola.
+
 ## [0.3.0] — Aplicación genérica + UI mejorada
 
 ### Añadido

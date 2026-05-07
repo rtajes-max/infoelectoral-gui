@@ -295,9 +295,17 @@ class MainWindow(QMainWindow):
 
         from ..parser import column_names
 
+        # Limpiamos filtros del proxy ANTES de cargar el nuevo modelo. Los
+        # índices de columna del modelo viejo no son válidos en el nuevo
+        # (el número y orden de columnas cambia entre tipos de fichero).
+        # El proxy también lo hace en setSourceModel/modelReset, pero blindamos.
+        self.proxy.clear_filters()
+
         self.model.reset_rows(column_names(meta.file_code), result.rows)
         self.table.resizeColumnsToContents()
         self.table.horizontalHeader().setStretchLastSection(True)
+
+        # Re-aplicamos filtros del UI sobre el modelo nuevo
         self._reapply_filters()
         self._set_export_enabled(True)
         self.act_show_errors.setEnabled(bool(result.error_lines))
@@ -315,44 +323,59 @@ class MainWindow(QMainWindow):
     # ---- Filtros ----------------------------------------------------------
 
     def _on_search_changed(self, text: str) -> None:
-        self.proxy.set_free_text(text)
-        self._update_status()
+        try:
+            self.proxy.set_free_text(text)
+            self._update_status()
+        except Exception as e:
+            QMessageBox.warning(self, "Error en filtro de texto", str(e))
 
     def _on_muni_changed(self, text: str) -> None:
-        cols = self.model.columns
-        if "Municipio" not in cols:
-            return
-        col_idx = cols.index("Municipio")
-        if text.strip():
-            self.proxy.set_column_in_set(col_idx, None)
-            self.proxy.set_column_filter(col_idx, text.strip())
-        else:
-            self.proxy.set_column_filter(col_idx, "")
-            # Reaplicamos el preset si está activo
-            self._reapply_preset_only()
-        self._update_status()
+        try:
+            cols = self.model.columns
+            if "Municipio" not in cols:
+                return
+            col_idx = cols.index("Municipio")
+            text = text.strip()
+            if text:
+                # Si hay texto, prevalece sobre el preset: quitamos el set
+                # exacto y aplicamos contains.
+                self.proxy.set_column_in_set(col_idx, None)
+                self.proxy.set_column_filter(col_idx, text)
+            else:
+                self.proxy.set_column_filter(col_idx, "")
+                # Volvemos a aplicar el preset si está seleccionado
+                self._reapply_preset_only()
+            self._update_status()
+        except Exception as e:
+            QMessageBox.warning(self, "Error en filtro de municipio", str(e))
 
     def _on_preset_changed(self, idx: int) -> None:
         # idx 0 = "(ninguno)"; idx N = preset N-1
-        cols = self.model.columns
-        if "Municipio" not in cols:
-            return
-        col_idx = cols.index("Municipio")
-        prov_idx = cols.index("Provincia") if "Provincia" in cols else -1
+        try:
+            cols = self.model.columns
+            if "Municipio" not in cols:
+                return
+            col_idx = cols.index("Municipio")
+            prov_idx = cols.index("Provincia") if "Provincia" in cols else -1
 
-        if idx <= 0:
-            self.proxy.set_column_in_set(col_idx, None)
-            if prov_idx >= 0:
-                self.proxy.set_column_in_set(prov_idx, None)
-        else:
-            preset = self._presets[idx - 1]
-            self.proxy.set_column_in_set(col_idx, set(preset.municipios) or None)
-            if prov_idx >= 0 and preset.provincia:
-                self.proxy.set_column_in_set(prov_idx, {preset.provincia})
-            elif prov_idx >= 0:
-                self.proxy.set_column_in_set(prov_idx, None)
+            if idx <= 0:
+                self.proxy.set_column_in_set(col_idx, None)
+                if prov_idx >= 0:
+                    self.proxy.set_column_in_set(prov_idx, None)
+            else:
+                if not (0 <= idx - 1 < len(self._presets)):
+                    return
+                preset = self._presets[idx - 1]
+                municipios_set = set(preset.municipios) if preset.municipios else None
+                self.proxy.set_column_in_set(col_idx, municipios_set)
+                if prov_idx >= 0 and preset.provincia:
+                    self.proxy.set_column_in_set(prov_idx, {preset.provincia})
+                elif prov_idx >= 0:
+                    self.proxy.set_column_in_set(prov_idx, None)
 
-        self._update_status()
+            self._update_status()
+        except Exception as e:
+            QMessageBox.warning(self, "Error al aplicar preset", str(e))
 
     def _reapply_filters(self) -> None:
         self._on_search_changed(self.search_edit.text())
