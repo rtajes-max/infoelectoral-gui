@@ -6,7 +6,7 @@ import datetime as _dt
 import sys as _sys
 from pathlib import Path as _Path
 
-__version__ = "0.3.1"
+__version__ = "0.3.2"
 
 
 def _detect_build_time() -> str:

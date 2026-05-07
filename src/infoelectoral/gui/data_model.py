@@ -17,6 +17,39 @@ class DatTableModel(QAbstractTableModel):
         super().__init__(parent)
         self._columns: list[str] = columns
         self._rows: list[dict[str, Any]] = rows
+        # Cache lazy para filtrado libre (texto en cualquier columna). Solo se
+        # construye la primera vez que se invoca `haystack()`. Evita los ~40s
+        # de carga para ficheros grandes (10 con 550k filas) cuando el usuario
+        # solo va a filtrar por columna concreta.
+        self._haystacks: list[str] | None = None
+
+    def _build_haystacks(self) -> list[str]:
+        out: list[str] = []
+        cols = self._columns
+        for r in self._rows:
+            parts: list[str] = []
+            for c in cols:
+                v = r.get(c)
+                if v is not None:
+                    parts.append(str(v))
+            out.append(" ".join(parts).lower())
+        return out
+
+    # ---- Acceso rápido (saltándose Qt) para el proxy ----------------------
+
+    def row_dict(self, source_row: int) -> dict[str, Any]:
+        """Devuelve el dict de la fila sin pasar por la pila de Qt (rápido)."""
+        if 0 <= source_row < len(self._rows):
+            return self._rows[source_row]
+        return {}
+
+    def haystack(self, source_row: int) -> str:
+        """Cadena con todos los valores concatenados en minúsculas (lazy)."""
+        if self._haystacks is None:
+            self._haystacks = self._build_haystacks()
+        if 0 <= source_row < len(self._haystacks):
+            return self._haystacks[source_row]
+        return ""
 
     # ---- Lectura -----------------------------------------------------------
 
@@ -59,6 +92,7 @@ class DatTableModel(QAbstractTableModel):
         self.beginResetModel()
         self._columns = columns
         self._rows = rows
+        self._haystacks = None  # invalida el cache; se reconstruirá al primer filtro libre
         self.endResetModel()
 
     # ---- Acceso para exportación ------------------------------------------
@@ -140,16 +174,25 @@ class DatFilterProxy(QSortFilterProxyModel):
         model = self.sourceModel()
         if model is None:
             return True
-        n_cols = model.columnCount(source_parent)
+
+        # Acceso rápido al dict de la fila si el modelo lo expone (DatTableModel).
+        # Esto se salta toda la pila de Qt (model.index + model.data) que es
+        # significativamente más lenta cuando hay 250k+ filas a evaluar.
+        row_dict = None
+        if hasattr(model, "row_dict"):
+            row_dict = model.row_dict(source_row)
+        cols_list: list[str] = getattr(model, "_columns", []) if row_dict is not None else []
+        n_cols = len(cols_list) if row_dict is not None else model.columnCount(source_parent)
 
         # Filtros por columna (substring): AND
         for col, needle in self._column_filters.items():
             if col < 0 or col >= n_cols:
-                # El filtro apunta a una columna que ya no existe (cambió el modelo).
-                # Lo ignoramos silenciosamente.
                 continue
-            idx = model.index(source_row, col, source_parent)
-            cell = (model.data(idx, Qt.DisplayRole) or "").lower()
+            if row_dict is not None:
+                cell = str(row_dict.get(cols_list[col]) or "").lower()
+            else:
+                idx = model.index(source_row, col, source_parent)
+                cell = (model.data(idx, Qt.DisplayRole) or "").lower()
             if needle not in cell:
                 return False
 
@@ -157,19 +200,27 @@ class DatFilterProxy(QSortFilterProxyModel):
         for col, allowed in self._column_in_set.items():
             if col < 0 or col >= n_cols:
                 continue
-            idx = model.index(source_row, col, source_parent)
-            cell = model.data(idx, Qt.DisplayRole) or ""
+            if row_dict is not None:
+                cell = str(row_dict.get(cols_list[col]) or "")
+            else:
+                idx = model.index(source_row, col, source_parent)
+                cell = model.data(idx, Qt.DisplayRole) or ""
             if cell not in allowed:
                 return False
 
-        # Texto libre: OR sobre todas las columnas
+        # Texto libre: usamos el haystack pre-computado del modelo (O(1) por fila).
         if self._free_text:
-            for c in range(n_cols):
-                idx = model.index(source_row, c, source_parent)
-                cell = (model.data(idx, Qt.DisplayRole) or "").lower()
-                if self._free_text in cell:
-                    return True
-            return False
+            if hasattr(model, "haystack"):
+                if self._free_text not in model.haystack(source_row):
+                    return False
+            else:
+                # Fallback al recorrido columna a columna
+                for c in range(n_cols):
+                    idx = model.index(source_row, c, source_parent)
+                    cell = (model.data(idx, Qt.DisplayRole) or "").lower()
+                    if self._free_text in cell:
+                        return True
+                return False
 
         return True
 

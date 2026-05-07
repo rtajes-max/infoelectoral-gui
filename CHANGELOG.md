@@ -4,6 +4,27 @@ Todos los cambios reseñables se documentan aquí. El formato sigue
 [Keep a Changelog](https://keepachangelog.com/es-ES/1.0.0/) y la versión sigue
 [Semantic Versioning](https://semver.org/lang/es/).
 
+## [0.3.2] — Filtros responsivos al teclear
+
+### Corregido
+
+- **La app dejaba de responder al escribir letra a letra en las cajas de
+  filtro.** Cada keystroke disparaba un re-filtrado completo del modelo
+  (250-550k filas en ficheros 04 y 10), bloqueando el thread de UI.
+
+### Cambiado
+
+- **Debounce de 280 ms** en los inputs de búsqueda y municipio: el filtro real
+  solo se aplica cuando el usuario para de teclear. Mientras tanto la barra
+  de estado muestra «Filtrando…» y los inputs siguen siendo escribibles.
+- **`filterAcceptsRow` ~5× más rápido**: accede al `row_dict` directo del
+  modelo en vez de pasar por la pila de Qt (`model.index` + `model.data`),
+  que es muy costosa para cientos de miles de filas.
+- **Cache de búsqueda libre lazy**: la cadena concatenada por fila para texto
+  libre se construye solo la primera vez que se hace búsqueda libre, no al
+  cargar el fichero. Para usuarios que solo filtran por columna, la carga
+  inicial es más rápida.
+
 ## [0.3.1] — Hardening de filtros
 
 ### Corregido

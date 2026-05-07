@@ -25,7 +25,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSortFilterProxyModel, Qt
+from PySide6.QtCore import QSortFilterProxyModel, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QComboBox,
@@ -67,6 +67,21 @@ class MainWindow(QMainWindow):
         self._metas: list[FileMeta] = []
         self._presets: list[Preset] = load_presets()
         self._settings: dict[str, Any] = load_settings()
+
+        # Debounce: al escribir letra a letra en una caja de filtro NO aplicamos
+        # el filtro en cada keystroke. Esperamos 280 ms tras el último teclazo
+        # y entonces aplicamos. Sin esto, con un fichero grande (fichero 04 con
+        # ~250k filas, fichero 10 con ~500k) el thread de UI se bloquea entre
+        # cada letra porque QSortFilterProxyModel re-evalúa todas las filas.
+        self._search_timer = QTimer(self)
+        self._search_timer.setSingleShot(True)
+        self._search_timer.setInterval(280)
+        self._search_timer.timeout.connect(self._apply_search_filter)
+
+        self._muni_timer = QTimer(self)
+        self._muni_timer.setSingleShot(True)
+        self._muni_timer.setInterval(280)
+        self._muni_timer.timeout.connect(self._apply_muni_filter)
 
         self._build_ui()
         self._build_toolbar()
@@ -322,20 +337,33 @@ class MainWindow(QMainWindow):
 
     # ---- Filtros ----------------------------------------------------------
 
-    def _on_search_changed(self, text: str) -> None:
+    # ---- Slots con debounce: solo arman el timer, el filtro real se aplica
+    # cuando el usuario para de escribir 280 ms.
+
+    def _on_search_changed(self, _text: str) -> None:
+        # Indicamos visualmente que hay un filtro pendiente
+        self.status_label.setText("Filtrando…")
+        self._search_timer.start()
+
+    def _on_muni_changed(self, _text: str) -> None:
+        self.status_label.setText("Filtrando…")
+        self._muni_timer.start()
+
+    def _apply_search_filter(self) -> None:
         try:
-            self.proxy.set_free_text(text)
+            self.proxy.set_free_text(self.search_edit.text())
             self._update_status()
         except Exception as e:
             QMessageBox.warning(self, "Error en filtro de texto", str(e))
 
-    def _on_muni_changed(self, text: str) -> None:
+    def _apply_muni_filter(self) -> None:
         try:
             cols = self.model.columns
             if "Municipio" not in cols:
+                self._update_status()
                 return
             col_idx = cols.index("Municipio")
-            text = text.strip()
+            text = self.muni_edit.text().strip()
             if text:
                 # Si hay texto, prevalece sobre el preset: quitamos el set
                 # exacto y aplicamos contains.
@@ -378,8 +406,11 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Error al aplicar preset", str(e))
 
     def _reapply_filters(self) -> None:
-        self._on_search_changed(self.search_edit.text())
-        self._on_muni_changed(self.muni_edit.text())
+        # Cancelamos timers pendientes y aplicamos los 3 filtros inmediatamente
+        self._search_timer.stop()
+        self._muni_timer.stop()
+        self._apply_search_filter()
+        self._apply_muni_filter()
         self._on_preset_changed(self.preset_combo.currentIndex())
 
     def _reapply_preset_only(self) -> None:
@@ -398,6 +429,9 @@ class MainWindow(QMainWindow):
         self.preset_combo.blockSignals(False)
 
     def _clear_filters(self) -> None:
+        # Cancelamos timers pendientes para que no disparen tras limpiar
+        self._search_timer.stop()
+        self._muni_timer.stop()
         self.search_edit.clear()
         self.muni_edit.clear()
         self.preset_combo.setCurrentIndex(0)
